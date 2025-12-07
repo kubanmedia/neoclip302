@@ -1,7 +1,7 @@
 {
   "name": "neoclip-api",
   "version": "1.0.0",
-  "description": "NeoClip AI Video Generator - Zero-cost serverless backend",
+  "description": "NeoClip AI Viral Short Video Generator ",
   "main": "api/generate.js",
   "type": "module",
   "scripts": {
@@ -34,6 +34,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/NeoClipAI/neoclip-production"
+    "url": "https://github.com/kubanmedia/neoclip302"
   }
 }

@@ -33,25 +33,6 @@ This project uses **Vercel Serverless Functions** (pure JavaScript API routes), 
    - Service role key used only server-side
    - Parameterized queries (no SQL injection)
 
-4. **Network Security**
-   - CORS properly configured
-   - HTTPS enforced (via Vercel)
-   - Optional webhook signature verification
-
-### Reporting Vulnerabilities
-
-If you discover a security vulnerability, please report it via:
-- Email: security@neoclip.ai
-- Do NOT create public issues for security vulnerabilities
-
-### Dependencies
-
-We regularly update dependencies to patch security vulnerabilities:
-
-```bash
-npm audit
-npm update
-```
 
 ### Recommended: If You Use Next.js
 
