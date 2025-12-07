@@ -1,1 +1,116 @@
-404
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeoClip - AI Video Generator</title>
+    <meta name="description" content="Generate 10-second viral shorts for FREE. No credit card, no watermark, no export limit.">
+  <script type="module" crossorigin src="/assets/index-Bd6vZLxy.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CQu4CAMP.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1 class="title">🎬 NeoClip</h1>
+            <p class="subtitle">AI Video Generator</p>
+        </header>
+
+        <!-- Stats Section -->
+        <div class="stats-container" id="statsContainer">
+            <div class="stat-item">
+                <div class="stat-value" id="freeRemaining">-</div>
+                <div class="stat-label">Free clips left</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="daysUntilReset">-</div>
+                <div class="stat-label">Days to reset</div>
+            </div>
+            <button class="upgrade-button" onclick="handleUpgrade()">
+                Upgrade to Pro
+            </button>
+        </div>
+
+        <!-- Tier Toggle -->
+        <div class="tier-toggle">
+            <button class="tier-button active" data-tier="free" onclick="selectTier('free')">
+                Free (10s)
+            </button>
+            <button class="tier-button" data-tier="paid" onclick="selectTier('paid')">
+                Pro (30s HD)
+            </button>
+        </div>
+
+        <!-- Prompt Input -->
+        <div class="input-container">
+            <textarea 
+                id="promptInput" 
+                class="prompt-input" 
+                placeholder="Describe your video... (e.g., 'A cat playing piano in space')"
+                maxlength="500"
+                rows="4"
+            ></textarea>
+            <div class="char-count">
+                <span id="charCount">0</span>/500
+            </div>
+        </div>
+
+        <!-- Generate Button -->
+        <button 
+            id="generateButton" 
+            class="generate-button" 
+            onclick="generateVideo()"
+        >
+            <span id="buttonText">Generate 10s FREE Video</span>
+        </button>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <p id="loadingMessage">Starting video generation...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="errorContainer" class="error-container hidden">
+            <p id="errorMessage"></p>
+        </div>
+
+        <!-- Video Player -->
+        <div id="videoContainer" class="video-container hidden">
+            <h3 class="video-title">Your Generated Video</h3>
+            <video 
+                id="videoPlayer" 
+                class="video-player" 
+                controls 
+                loop
+            ></video>
+            <div id="adBanner" class="ad-banner hidden">
+                <p>⭐ Upgrade to Pro to remove ads and get 1080p quality!</p>
+            </div>
+            <div class="video-actions">
+                <button class="action-button" onclick="downloadVideo()">
+                    📥 Download
+                </button>
+                <button class="action-button" onclick="shareVideo()">
+                    📤 Share
+                </button>
+                <button class="action-button" onclick="resetUI()">
+                    🔄 Generate New
+                </button>
+            </div>
+        </div>
+
+        <!-- Recent Generations -->
+        <div id="historyContainer" class="history-container hidden">
+            <h3 class="history-title">Recent Generations</h3>
+            <div id="historyList" class="history-list"></div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Made with ❤️ by NeoClip AI | <a href="https://github.com/kubanmedia/neoclip302" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+
+</body>
+</html>
