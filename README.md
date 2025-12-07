@@ -17,15 +17,6 @@ This project uses Vercel Serverless Functions (NOT Next.js with React Server Com
 - ✅ CORS headers properly configured
 - ✅ Webhook signature verification (optional)
 
-## 📊 API Endpoints
-
-### POST `/api/generate`
-Generate a video from a text prompt.
-
-
-### GET `/api/status`
-Check generation status or user info.
-
 
 ## 📄 License
 
