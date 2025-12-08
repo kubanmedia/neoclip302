@@ -233,3 +233,56 @@ export default async function handler(req, res) {
     });
   }
 }
+
+
+import { createClient } from '@supabase/supabase-js';
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+const FALLBACKS = {
+  free: [
+    { name:'Wan',     url:'https://api.replicate.com/v1/predictions', key:process.env.REPLICATE_KEY, version:'wan-2.1-1.3b', cost:0.0008 },
+    { name:'Pika',    url:'https://api.pika.art/v1/videos',          key:process.env.PIKA_KEY,       cost:0 }
+  ],
+  paid: [
+    { name:'Luma',    url:'https://api.piapi.ai/v1/luma/video',      key:process.env.PIAPI_KEY,      cost:0.20 }
+  ]
+};
+
+export default async function handler(req, res){
+  if(req.method !== 'POST') return res.status(405).end();
+  const {prompt,userId,tier='free',length=10} = req.body;
+
+  // quota guard
+  const {data:u} = await supabase.from('users').select('free_used,tier').eq('id',userId).single();
+  if(tier==='free' && u.free_used>=10) return res.status(402).json({error:'Free limit'});
+  await supabase.from('users').update({free_used:u.free_used+1}).eq('id',userId);
+
+  // rotate chain
+  const chain = FALLBACKS[tier];
+  let url = null;
+  for(const m of chain){
+    for(let r=0;r<2;r++){
+      try{
+        const {id} = await fetch(m.url,{
+          method:'POST',
+          headers:{Authorization:`Bearer ${m.key}`,'Content-Type':'application/json'},
+          body:JSON.stringify({prompt,duration:length,version:m.version})
+        }).then(d=>d.json());
+        for(let i=0;i<15;i++){
+          await new Promise(res=>setTimeout(res,4000));
+          const {output,video_url} = await fetch(`${m.url}/${id}`,{headers:{Authorization:`Bearer ${m.key}`}}).then(d=>d.json());
+          url = output?.[0] || video_url;
+          if(url) break;
+        }
+        if(url) break;
+      }catch(e){console.log(`${m.name} retry ${r}`,e.message)}
+    }
+    if(url) break;
+  }
+
+  if(!url){
+    await supabase.from('users').update({free_used:u.free_used}).eq('id',userId); // rollback
+    return res.status(500).json({error:'All fallbacks exhausted'});
+  }
+  res.json({videoUrl:url,needsAd:tier==='free'});
+}
