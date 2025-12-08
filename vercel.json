@@ -4,9 +4,17 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/**/*.js": {
+    "api/generate.js": {
       "maxDuration": 300,
       "memory": 1024
+    },
+    "api/debug.js": {
+      "maxDuration": 60,
+      "memory": 512
+    },
+    "api/**/*.js": {
+      "maxDuration": 30,
+      "memory": 512
     }
   },
   "rewrites": [

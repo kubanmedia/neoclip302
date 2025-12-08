@@ -1,4 +1,4 @@
--- NeoClip Production - Supabase Database Schema
+-- NeoClip 302 - Supabase Database Schema
 -- Run this SQL in your Supabase SQL Editor to set up the database
 
 -- Enable UUID extension
@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     tier TEXT DEFAULT 'free' CHECK (tier IN ('free', 'basic', 'pro')),
     free_used INTEGER DEFAULT 0 CHECK (free_used >= 0),
     resets_at DATE DEFAULT (date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month')::DATE,
+    rotation_index INTEGER DEFAULT 0,
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -34,24 +35,38 @@ CREATE TABLE IF NOT EXISTS generations (
     task_id TEXT,
     prompt TEXT NOT NULL,
     tier TEXT DEFAULT 'free',
-    length INTEGER DEFAULT 10,
-    resolution TEXT DEFAULT '768p',
     model TEXT,
     video_url TEXT,
     thumbnail_url TEXT,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+    status TEXT DEFAULT 'completed',
     error TEXT,
-    cost_usd DECIMAL(10, 6) DEFAULT 0,
+    cost DECIMAL(10, 6) DEFAULT 0,
+    duration_ms INTEGER,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    completed_at TIMESTAMPTZ
 );
 
 -- Indexes for generations
 CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
 CREATE INDEX IF NOT EXISTS idx_generations_task_id ON generations(task_id);
-CREATE INDEX IF NOT EXISTS idx_generations_status ON generations(status);
 CREATE INDEX IF NOT EXISTS idx_generations_created_at ON generations(created_at DESC);
+
+-- ============================================
+-- API KEYS TABLE (for key rotation)
+-- ============================================
+CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    provider TEXT NOT NULL, -- 'replicate', 'fal', 'piapi'
+    key_value TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    free_credits_remaining INTEGER DEFAULT 0,
+    last_used_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider);
+CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active);
 
 -- ============================================
 -- WEBHOOK LOGS TABLE
@@ -65,55 +80,37 @@ CREATE TABLE IF NOT EXISTS webhook_logs (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- Index for webhook logs
 CREATE INDEX IF NOT EXISTS idx_webhook_logs_task_id ON webhook_logs(task_id);
 CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at DESC);
 
 -- ============================================
--- SUBSCRIPTIONS TABLE (for payment tracking)
--- ============================================
-CREATE TABLE IF NOT EXISTS subscriptions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    stripe_subscription_id TEXT UNIQUE,
-    stripe_price_id TEXT,
-    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'canceled', 'past_due', 'unpaid')),
-    tier TEXT NOT NULL,
-    current_period_start TIMESTAMPTZ,
-    current_period_end TIMESTAMPTZ,
-    cancel_at_period_end BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
--- Index for subscriptions
-CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_id ON subscriptions(stripe_subscription_id);
-
--- ============================================
--- REFERRALS TABLE (affiliate program)
--- ============================================
-CREATE TABLE IF NOT EXISTS referrals (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    referrer_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    referred_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    referral_code TEXT NOT NULL,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'rewarded')),
-    reward_type TEXT DEFAULT 'free_month',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMPTZ,
-    UNIQUE(referrer_id, referred_id)
-);
-
--- Index for referrals
-CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals(referrer_id);
-CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(referral_code);
-
--- ============================================
--- STORED PROCEDURES
+-- ROW LEVEL SECURITY (RLS)
 -- ============================================
 
--- Function to reset monthly free usage
+-- Enable RLS on all tables
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE generations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
+
+-- Allow service role full access
+CREATE POLICY "Service role has full access to users"
+    ON users FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Service role has full access to generations"
+    ON generations FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Service role has full access to api_keys"
+    ON api_keys FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Service role has full access to webhook_logs"
+    ON webhook_logs FOR ALL USING (true) WITH CHECK (true);
+
+-- ============================================
+-- HELPER FUNCTIONS
+-- ============================================
+
+-- Reset monthly free usage
 CREATE OR REPLACE FUNCTION reset_monthly_free_usage()
 RETURNS void AS $$
 BEGIN
@@ -126,86 +123,33 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to deduct credits (called from API)
-CREATE OR REPLACE FUNCTION deduct_credits(uid UUID, c INTEGER DEFAULT 1)
-RETURNS void AS $$
-BEGIN
-    UPDATE users
-    SET 
-        free_used = free_used + c,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = uid;
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to check if user can generate (returns true/false)
-CREATE OR REPLACE FUNCTION can_generate(uid UUID)
-RETURNS BOOLEAN AS $$
+-- Get next active API key for a provider
+CREATE OR REPLACE FUNCTION get_active_key(provider_name TEXT)
+RETURNS TEXT AS $$
 DECLARE
-    user_record RECORD;
+    key_val TEXT;
 BEGIN
-    SELECT tier, free_used, resets_at INTO user_record
-    FROM users WHERE id = uid;
+    SELECT key_value INTO key_val
+    FROM api_keys
+    WHERE provider = provider_name
+      AND is_active = true
+    ORDER BY last_used_at NULLS FIRST
+    LIMIT 1;
     
-    IF user_record IS NULL THEN
-        RETURN FALSE;
+    IF key_val IS NOT NULL THEN
+        UPDATE api_keys
+        SET last_used_at = CURRENT_TIMESTAMP
+        WHERE provider = provider_name AND key_value = key_val;
     END IF;
     
-    -- Paid tiers can always generate
-    IF user_record.tier IN ('basic', 'pro') THEN
-        RETURN TRUE;
-    END IF;
-    
-    -- Free tier: check limit
-    RETURN user_record.free_used < 10;
+    RETURN key_val;
 END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================
--- ROW LEVEL SECURITY (RLS)
+-- AUTO-UPDATE TRIGGER
 -- ============================================
 
--- Enable RLS on all tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE generations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
-
--- Policy for service role (API access - full access)
--- Note: These policies allow the service role key to access all data
--- The service role is used by the Vercel API functions
-
-CREATE POLICY "Service role has full access to users"
-    ON users FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-CREATE POLICY "Service role has full access to generations"
-    ON generations FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-CREATE POLICY "Service role has full access to subscriptions"
-    ON subscriptions FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-CREATE POLICY "Service role has full access to referrals"
-    ON referrals FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-CREATE POLICY "Service role has full access to webhook_logs"
-    ON webhook_logs FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
--- ============================================
--- TRIGGERS
--- ============================================
-
--- Auto-update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -218,23 +162,3 @@ CREATE TRIGGER update_users_updated_at
     BEFORE UPDATE ON users
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_generations_updated_at
-    BEFORE UPDATE ON generations
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_subscriptions_updated_at
-    BEFORE UPDATE ON subscriptions
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- ============================================
--- SAMPLE DATA (for testing - remove in production)
--- ============================================
--- Uncomment the following to insert test data:
-
--- INSERT INTO users (id, device_id, email, tier, free_used)
--- VALUES 
---     ('00000000-0000-0000-0000-000000000001', 'test-device-1', 'test@example.com', 'free', 0),
---     ('00000000-0000-0000-0000-000000000002', 'test-device-2', 'pro@example.com', 'pro', 0);
