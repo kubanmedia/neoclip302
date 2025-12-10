@@ -1,57 +1,47 @@
 {
   "expo": {
-    "name": "NeoClip",
-    "slug": "neoclip",
-    "version": "1.0.0",
+    "name": "NeoClip AI - Video Generator",
+    "slug": "neoclip-ai",
+    "version": "3.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "scheme": "neoclip",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
+      "backgroundColor": "#050510"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.neoclip.app",
-      "buildNumber": "1",
-      "config": {
-        "googleMobileAdsAppId": "YOUR_ADMOB_IOS_APP_ID"
+      "bundleIdentifier": "com.neoclip.ai",
+      "buildNumber": "32",
+      "infoPlist": {
+        "NSCameraUsageDescription": "NeoClip needs camera access for reference images",
+        "NSPhotoLibraryUsageDescription": "NeoClip needs photo library access to save videos",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0a0a0a"
+        "backgroundColor": "#050510"
       },
-      "package": "com.neoclip.app",
-      "versionCode": 1,
-      "config": {
-        "googleMobileAdsAppId": "YOUR_ADMOB_ANDROID_APP_ID"
-      }
+      "package": "com.neoclip.ai",
+      "versionCode": 32
     },
     "web": {
+      "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      [
-        "expo-av",
-        {
-          "microphonePermission": "Allow NeoClip to access your microphone for voice prompts."
-        }
-      ]
-    ],
     "extra": {
-      "apiBaseUrl": "https://your-vercel-app.vercel.app",
-      "admobBannerId": "ca-app-pub-xxxxxxxxxxxxx/yyyyyyyyyy",
-      "admobRewardedId": "ca-app-pub-xxxxxxxxxxxxx/zzzzzzzzzz",
-      "eas": {
-        "projectId": "your-eas-project-id"
-      }
+      "apiBaseUrl": "https://neoclip302.vercel.app"
     },
-    "owner": "your-expo-username"
+    "owner": "kubanmedia",
+    "description": "Generate viral short videos with AI! 10 FREE clips per month, no credit card needed.",
+    "githubUrl": "https://github.com/kubanmedia/neoclip302",
+    "primaryColor": "#00D9FF",
+    "keywords": ["ai video generator", "video creator", "tiktok videos", "reels maker", "youtube shorts"]
   }
 }
