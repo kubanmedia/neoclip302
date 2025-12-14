@@ -5,14 +5,26 @@
   "outputDirectory": "dist",
   "functions": {
     "api/generate.js": {
-      "maxDuration": 300,
+      "maxDuration": 60,
       "memory": 1024
     },
-    "api/debug.js": {
-      "maxDuration": 60,
+    "api/poll.js": {
+      "maxDuration": 30,
       "memory": 512
     },
-    "api/**/*.js": {
+    "api/status.js": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/user.js": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/debug.js": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/webhook.js": {
       "maxDuration": 30,
       "memory": 512
     }

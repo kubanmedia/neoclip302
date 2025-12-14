@@ -1,18 +1,29 @@
 /**
- * NeoClip Frontend - Main Application
- * Connects to Vercel API backend for video generation
+ * NeoClip Frontend v3.3.0 - Main Application
+ * With async polling pattern for video generation
+ * 
+ * Flow:
+ * 1. POST /api/generate - Creates task, returns generationId
+ * 2. Poll GET /api/poll?generationId=xxx every 3 seconds
+ * 3. When completed, display video
  */
 
 // Configuration
 const API_BASE_URL = window.location.hostname === 'localhost' 
     ? 'http://localhost:3000' 
-    : 'https://neoclip302.vercel.app';
+    : window.location.origin;
+
+// Polling configuration
+const POLL_INTERVAL_MS = 3000;  // Poll every 3 seconds
+const MAX_POLL_TIME_MS = 300000; // Max 5 minutes
 
 // State
 let currentUser = null;
 let selectedTier = 'free';
 let currentVideoUrl = null;
 let generations = [];
+let pollTimer = null;
+let pollStartTime = null;
 
 // Initialize app on load
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,10 +34,14 @@ document.addEventListener('DOMContentLoaded', () => {
 // Setup event listeners
 function setupEventListeners() {
     const promptInput = document.getElementById('promptInput');
-    promptInput.addEventListener('input', (e) => {
-        const charCount = document.getElementById('charCount');
-        charCount.textContent = e.target.value.length;
-    });
+    if (promptInput) {
+        promptInput.addEventListener('input', (e) => {
+            const charCount = document.getElementById('charCount');
+            if (charCount) {
+                charCount.textContent = e.target.value.length;
+            }
+        });
+    }
 }
 
 // Initialize application
@@ -74,8 +89,11 @@ function updateUserStats() {
     const now = new Date();
     const daysUntilReset = Math.ceil((resetsAt - now) / (1000 * 60 * 60 * 24));
 
-    document.getElementById('freeRemaining').textContent = Math.max(0, freeRemaining);
-    document.getElementById('daysUntilReset').textContent = Math.max(0, daysUntilReset);
+    const freeRemainingEl = document.getElementById('freeRemaining');
+    const daysUntilResetEl = document.getElementById('daysUntilReset');
+
+    if (freeRemainingEl) freeRemainingEl.textContent = Math.max(0, freeRemaining);
+    if (daysUntilResetEl) daysUntilResetEl.textContent = Math.max(0, daysUntilReset);
 }
 
 // Select tier
@@ -92,16 +110,19 @@ function selectTier(tier) {
 
     // Update generate button text
     const buttonText = document.getElementById('buttonText');
-    if (tier === 'free') {
-        buttonText.textContent = 'Generate 10s FREE Video';
-    } else {
-        buttonText.textContent = 'Generate 30s HD Video (Pro)';
+    if (buttonText) {
+        if (tier === 'free') {
+            buttonText.textContent = 'Generate 10s FREE Video';
+        } else {
+            buttonText.textContent = 'Generate 30s HD Video (Pro)';
+        }
     }
 }
 
-// Generate video
+// Generate video (async with polling)
 async function generateVideo() {
-    const prompt = document.getElementById('promptInput').value.trim();
+    const promptInput = document.getElementById('promptInput');
+    const prompt = promptInput ? promptInput.value.trim() : '';
 
     if (!prompt) {
         showError('Please enter a prompt to generate a video');
@@ -113,18 +134,28 @@ async function generateVideo() {
         return;
     }
 
-    // UI updates
+    // Stop any existing polling
+    stopPolling();
+
+    // UI updates - show loading
     const generateButton = document.getElementById('generateButton');
     const loadingIndicator = document.getElementById('loadingIndicator');
+    const loadingText = document.getElementById('loadingText');
+    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
     const errorContainer = document.getElementById('errorContainer');
     const videoContainer = document.getElementById('videoContainer');
 
-    generateButton.disabled = true;
-    loadingIndicator.classList.remove('hidden');
-    errorContainer.classList.add('hidden');
-    videoContainer.classList.add('hidden');
+    if (generateButton) generateButton.disabled = true;
+    if (loadingIndicator) loadingIndicator.classList.remove('hidden');
+    if (loadingText) loadingText.textContent = 'Starting video generation...';
+    if (progressBar) progressBar.classList.remove('hidden');
+    if (progressFill) progressFill.style.width = '5%';
+    if (errorContainer) errorContainer.classList.add('hidden');
+    if (videoContainer) videoContainer.classList.add('hidden');
 
     try {
+        // Step 1: Create generation task
         const response = await fetch(`${API_BASE_URL}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -140,54 +171,163 @@ async function generateVideo() {
 
         if (!response.ok) {
             if (response.status === 402) {
-                // Free limit reached
                 showError(data.message || 'Free limit reached. Upgrade to Pro for unlimited clips!');
                 setTimeout(() => handleUpgrade(), 2000);
                 return;
             }
-            throw new Error(data.error || 'Generation failed');
+            throw new Error(data.error || data.message || 'Failed to start generation');
         }
 
-        if (data.success && data.videoUrl) {
-            currentVideoUrl = data.videoUrl;
-            displayVideo(data.videoUrl);
-
-            // Update user stats
-            if (data.remainingFree !== null) {
-                currentUser.free_used = 10 - data.remainingFree;
-                updateUserStats();
-            }
-
-            // Reload generations
-            await loadUserGenerations();
+        if (!data.success || !data.generationId) {
+            throw new Error(data.error || 'Invalid response from server');
         }
+
+        console.log('Generation started:', data);
+        
+        // Update remaining free count immediately
+        if (data.remainingFree !== null && data.remainingFree !== undefined) {
+            currentUser.free_used = 10 - data.remainingFree;
+            updateUserStats();
+        }
+
+        // Update loading text
+        if (loadingText) loadingText.textContent = `Generating with ${data.providerName || 'AI'}...`;
+        if (progressFill) progressFill.style.width = '15%';
+
+        // Step 2: Start polling for completion
+        pollStartTime = Date.now();
+        startPolling(data.generationId, data.needsAd);
+
     } catch (error) {
         console.error('Generation error:', error);
-        showError(error.message || 'Failed to generate video. Please try again.');
-    } finally {
-        generateButton.disabled = false;
-        loadingIndicator.classList.add('hidden');
+        showError(error.message || 'Failed to start video generation. Please try again.');
+        resetLoadingUI();
     }
 }
 
+// Start polling for generation status
+function startPolling(generationId, needsAd) {
+    console.log(`Starting poll for ${generationId}`);
+    
+    const poll = async () => {
+        // Check timeout
+        if (Date.now() - pollStartTime > MAX_POLL_TIME_MS) {
+            stopPolling();
+            showError('Generation timed out. Please try again.');
+            resetLoadingUI();
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/poll?generationId=${generationId}`);
+            const data = await response.json();
+
+            console.log('Poll response:', data);
+
+            // Update progress bar
+            const progressFill = document.getElementById('progressFill');
+            const loadingText = document.getElementById('loadingText');
+
+            if (data.progress && progressFill) {
+                progressFill.style.width = `${Math.min(data.progress, 95)}%`;
+            }
+
+            if (data.status === 'completed' && data.videoUrl) {
+                // Success!
+                stopPolling();
+                
+                if (progressFill) progressFill.style.width = '100%';
+                if (loadingText) loadingText.textContent = 'Video ready!';
+
+                currentVideoUrl = data.videoUrl;
+                displayVideo(data.videoUrl, needsAd);
+                
+                // Reload generations list
+                await loadUserGenerations();
+                
+                resetLoadingUI();
+                return;
+            }
+
+            if (data.status === 'failed') {
+                // Failed
+                stopPolling();
+                showError(data.error || 'Video generation failed. Please try again.');
+                resetLoadingUI();
+                
+                // Refresh user stats (usage was rolled back)
+                await loadUserGenerations();
+                return;
+            }
+
+            // Still processing - update UI
+            if (loadingText) {
+                const elapsed = Math.round((Date.now() - pollStartTime) / 1000);
+                if (data.status === 'queued') {
+                    loadingText.textContent = `Queued for processing... (${elapsed}s)`;
+                } else {
+                    loadingText.textContent = `Generating video... ${data.progress || 30}% (${elapsed}s)`;
+                }
+            }
+
+            // Schedule next poll
+            pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+
+        } catch (error) {
+            console.error('Poll error:', error);
+            // Don't stop on poll errors, retry
+            pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+        }
+    };
+
+    // Start first poll
+    poll();
+}
+
+// Stop polling
+function stopPolling() {
+    if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+    }
+    pollStartTime = null;
+}
+
+// Reset loading UI
+function resetLoadingUI() {
+    const generateButton = document.getElementById('generateButton');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
+
+    if (generateButton) generateButton.disabled = false;
+    if (loadingIndicator) loadingIndicator.classList.add('hidden');
+    if (progressBar) progressBar.classList.add('hidden');
+    if (progressFill) progressFill.style.width = '0%';
+}
+
 // Display video
-function displayVideo(videoUrl) {
+function displayVideo(videoUrl, showAd = false) {
     const videoContainer = document.getElementById('videoContainer');
     const videoPlayer = document.getElementById('videoPlayer');
     const adBanner = document.getElementById('adBanner');
 
-    videoPlayer.src = videoUrl;
-    videoContainer.classList.remove('hidden');
+    if (videoPlayer) videoPlayer.src = videoUrl;
+    if (videoContainer) videoContainer.classList.remove('hidden');
 
     // Show ad banner for free tier
-    if (selectedTier === 'free') {
-        adBanner.classList.remove('hidden');
-    } else {
-        adBanner.classList.add('hidden');
+    if (adBanner) {
+        if (showAd || selectedTier === 'free') {
+            adBanner.classList.remove('hidden');
+        } else {
+            adBanner.classList.add('hidden');
+        }
     }
 
     // Scroll to video
-    videoContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (videoContainer) {
+        videoContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
 }
 
 // Load user generations
@@ -219,6 +359,8 @@ function displayGenerations() {
     const historyContainer = document.getElementById('historyContainer');
     const historyList = document.getElementById('historyList');
 
+    if (!historyContainer || !historyList) return;
+
     if (generations.length === 0) {
         historyContainer.classList.add('hidden');
         return;
@@ -237,16 +379,41 @@ function displayGenerations() {
         item.className = 'history-item';
         item.innerHTML = `
             <div class="history-prompt">${escapeHtml(gen.prompt)}</div>
-            <div class="history-tier">${gen.tier === 'free' ? '🎬 Free' : '⭐ Pro'}</div>
+            <div class="history-meta">
+                <span class="history-tier">${gen.tier === 'free' ? '🎬 Free' : '⭐ Pro'}</span>
+                <span class="history-time">${formatTime(gen.createdAt)}</span>
+            </div>
         `;
         item.addEventListener('click', () => {
             if (gen.videoUrl) {
                 currentVideoUrl = gen.videoUrl;
-                displayVideo(gen.videoUrl);
+                displayVideo(gen.videoUrl, gen.tier === 'free');
             }
         });
         historyList.appendChild(item);
     });
+}
+
+// Format time for display
+function formatTime(isoString) {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return `${diffHours}h ago`;
+        
+        const diffDays = Math.floor(diffHours / 24);
+        return `${diffDays}d ago`;
+    } catch {
+        return '';
+    }
 }
 
 // Download video
@@ -278,7 +445,7 @@ async function shareVideo() {
         } else {
             // Fallback: copy to clipboard
             await navigator.clipboard.writeText(currentVideoUrl);
-            alert('Video URL copied to clipboard!');
+            showSuccess('Video URL copied to clipboard!');
         }
     } catch (error) {
         console.error('Share failed:', error);
@@ -287,11 +454,17 @@ async function shareVideo() {
 
 // Reset UI for new generation
 function resetUI() {
-    document.getElementById('promptInput').value = '';
-    document.getElementById('charCount').textContent = '0';
-    document.getElementById('videoContainer').classList.add('hidden');
-    document.getElementById('errorContainer').classList.add('hidden');
+    const promptInput = document.getElementById('promptInput');
+    const charCount = document.getElementById('charCount');
+    const videoContainer = document.getElementById('videoContainer');
+    const errorContainer = document.getElementById('errorContainer');
+
+    if (promptInput) promptInput.value = '';
+    if (charCount) charCount.textContent = '0';
+    if (videoContainer) videoContainer.classList.add('hidden');
+    if (errorContainer) errorContainer.classList.add('hidden');
     currentVideoUrl = null;
+    stopPolling();
 }
 
 // Handle upgrade
@@ -315,13 +488,19 @@ function showError(message) {
     const errorContainer = document.getElementById('errorContainer');
     const errorMessage = document.getElementById('errorMessage');
 
-    errorMessage.textContent = message;
-    errorContainer.classList.remove('hidden');
+    if (errorMessage) errorMessage.textContent = message;
+    if (errorContainer) errorContainer.classList.remove('hidden');
 
-    // Auto-hide after 5 seconds
+    // Auto-hide after 8 seconds
     setTimeout(() => {
-        errorContainer.classList.add('hidden');
-    }, 5000);
+        if (errorContainer) errorContainer.classList.add('hidden');
+    }, 8000);
+}
+
+// Show success message
+function showSuccess(message) {
+    // Simple alert for now - could be enhanced with toast notification
+    alert(message);
 }
 
 // Escape HTML to prevent XSS

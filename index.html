@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NeoClip - AI Video Generator</title>
     <meta name="description" content="Generate 10-second viral shorts for FREE. No credit card, no watermark, no export limit.">
+    <meta name="keywords" content="ai video generator, free video generator, viral shorts, tiktok video maker, reels generator">
+    <meta property="og:title" content="NeoClip - AI Video Generator">
+    <meta property="og:description" content="Generate 10-second viral shorts for FREE. No credit card needed.">
+    <meta property="og:type" content="website">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -13,6 +17,7 @@
         <header class="header">
             <h1 class="title">🎬 NeoClip</h1>
             <p class="subtitle">AI Video Generator</p>
+            <p class="version">v3.3.0</p>
         </header>
 
         <!-- Stats Section -->
@@ -26,17 +31,17 @@
                 <div class="stat-label">Days to reset</div>
             </div>
             <button class="upgrade-button" onclick="handleUpgrade()">
-                Upgrade to Pro
+                ⭐ Upgrade to Pro
             </button>
         </div>
 
         <!-- Tier Toggle -->
         <div class="tier-toggle">
             <button class="tier-button active" data-tier="free" onclick="selectTier('free')">
-                Free (10s)
+                🎬 Free (10s)
             </button>
             <button class="tier-button" data-tier="paid" onclick="selectTier('paid')">
-                Pro (30s HD)
+                ⭐ Pro (30s HD)
             </button>
         </div>
 
@@ -60,54 +65,85 @@
             class="generate-button" 
             onclick="generateVideo()"
         >
-            <span id="buttonText">Generate 10s FREE Video</span>
+            <span id="buttonText">🚀 Generate 10s FREE Video</span>
         </button>
 
-        <!-- Loading Indicator -->
+        <!-- Loading Indicator with Progress Bar -->
         <div id="loadingIndicator" class="loading-indicator hidden">
             <div class="spinner"></div>
-            <p id="loadingMessage">Starting video generation...</p>
+            <p id="loadingText">Starting video generation...</p>
+            <div id="progressBar" class="progress-bar hidden">
+                <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+            </div>
+            <p class="loading-tip">⏱️ Video generation typically takes 30-90 seconds</p>
         </div>
 
         <!-- Error Message -->
         <div id="errorContainer" class="error-container hidden">
+            <span class="error-icon">⚠️</span>
             <p id="errorMessage"></p>
+            <button class="error-close" onclick="document.getElementById('errorContainer').classList.add('hidden')">×</button>
         </div>
 
         <!-- Video Player -->
         <div id="videoContainer" class="video-container hidden">
-            <h3 class="video-title">Your Generated Video</h3>
+            <h3 class="video-title">✨ Your Generated Video</h3>
             <video 
                 id="videoPlayer" 
                 class="video-player" 
                 controls 
                 loop
+                playsinline
             ></video>
             <div id="adBanner" class="ad-banner hidden">
                 <p>⭐ Upgrade to Pro to remove ads and get 1080p quality!</p>
             </div>
             <div class="video-actions">
-                <button class="action-button" onclick="downloadVideo()">
+                <button class="action-button download" onclick="downloadVideo()">
                     📥 Download
                 </button>
-                <button class="action-button" onclick="shareVideo()">
+                <button class="action-button share" onclick="shareVideo()">
                     📤 Share
                 </button>
-                <button class="action-button" onclick="resetUI()">
-                    🔄 Generate New
+                <button class="action-button new" onclick="resetUI()">
+                    🔄 New Video
                 </button>
             </div>
         </div>
 
         <!-- Recent Generations -->
         <div id="historyContainer" class="history-container hidden">
-            <h3 class="history-title">Recent Generations</h3>
+            <h3 class="history-title">📚 Recent Generations</h3>
             <div id="historyList" class="history-list"></div>
+        </div>
+
+        <!-- Features Section -->
+        <div class="features-section">
+            <h3>Why Choose NeoClip?</h3>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <span class="feature-icon">🎁</span>
+                    <span class="feature-text">10 FREE clips/month</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">💳</span>
+                    <span class="feature-text">No credit card</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">🚫</span>
+                    <span class="feature-text">No watermark</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">♾️</span>
+                    <span class="feature-text">Unlimited exports</span>
+                </div>
+            </div>
         </div>
 
         <!-- Footer -->
         <footer class="footer">
-            <p>Made with ❤️ by NeoClip AI | <a href="https://github.com/kubanmedia/neoclip302" target="_blank">GitHub</a></p>
+            <p>Made with ❤️ by NeoClip AI</p>
+            <p><a href="https://github.com/kubanmedia/neoclip302" target="_blank">GitHub</a> | v3.3.0</p>
         </footer>
     </div>
 
