@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NeoClip - AI Video Generator</title>
-    <meta name="description" content="Generate 10-second viral shorts for FREE. No credit card, no watermark, no export limit.">
-    <meta name="keywords" content="ai video generator, free video generator, viral shorts, tiktok video maker, reels generator">
+    <title>NeoClip - AI Video Generator | 10 Free Clips/Month</title>
+    <meta name="description" content="Generate viral 10-second shorts for FREE with AI. No credit card, no watermark, unlimited exports. Create TikTok, Reels, and YouTube Shorts instantly.">
+    <meta name="keywords" content="ai video generator, free video maker, tiktok video generator, reels maker, youtube shorts, viral video">
+    
+    <!-- Open Graph -->
     <meta property="og:title" content="NeoClip - AI Video Generator">
-    <meta property="og:description" content="Generate 10-second viral shorts for FREE. No credit card needed.">
+    <meta property="og:description" content="Generate viral shorts for FREE. 10 clips/month, no watermark.">
     <meta property="og:type" content="website">
-  <script type="module" crossorigin src="/assets/index-DHxWGKcj.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BkecUBj9.css">
+    <meta property="og:url" content="https://neoclip302.vercel.app">
+    
+  <script type="module" crossorigin src="/assets/index-6EjYsMDQ.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-C3n6Vis1.css">
 </head>
 <body>
     <div class="container">
@@ -18,8 +22,14 @@
         <header class="header">
             <h1 class="title">🎬 NeoClip</h1>
             <p class="subtitle">AI Video Generator</p>
-            <p class="version">v3.3.0</p>
+            <p class="version">v3.4.0</p>
         </header>
+
+        <!-- Navigation -->
+        <nav class="nav-bar">
+            <button class="nav-btn active" onclick="showScreen('home')">🏠 Create</button>
+            <button class="nav-btn" onclick="showLibrary()">📚 Library</button>
+        </nav>
 
         <!-- Stats Section -->
         <div class="stats-container" id="statsContainer">
@@ -51,7 +61,7 @@
             <textarea 
                 id="promptInput" 
                 class="prompt-input" 
-                placeholder="Describe your video... (e.g., 'A cat playing piano in space')"
+                placeholder="Describe your video... (e.g., 'A cat surfing on a rainbow wave in space')"
                 maxlength="500"
                 rows="4"
             ></textarea>
@@ -69,14 +79,19 @@
             <span id="buttonText">🚀 Generate 10s FREE Video</span>
         </button>
 
-        <!-- Loading Indicator with Progress Bar -->
+        <!-- Time Warning -->
+        <div class="time-warning">
+            ⏱️ Generation takes 3-5 minutes. Please wait patiently.
+        </div>
+
+        <!-- Loading Indicator with Progress -->
         <div id="loadingIndicator" class="loading-indicator hidden">
             <div class="spinner"></div>
             <p id="loadingText">Starting video generation...</p>
             <div id="progressBar" class="progress-bar hidden">
-                <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+                <div id="progressFill" class="progress-fill"></div>
             </div>
-            <p class="loading-tip">⏱️ Video generation typically takes 30-90 seconds</p>
+            <p class="loading-tip">⏱️ Video generation typically takes 3-5 minutes</p>
         </div>
 
         <!-- Error Message -->
@@ -95,9 +110,10 @@
                 controls 
                 loop
                 playsinline
+                autoplay
             ></video>
             <div id="adBanner" class="ad-banner hidden">
-                <p>⭐ Upgrade to Pro to remove ads and get 1080p quality!</p>
+                <p>⭐ Upgrade to Pro for ad-free 1080p videos!</p>
             </div>
             <div class="video-actions">
                 <button class="action-button download" onclick="downloadVideo()">
@@ -112,9 +128,12 @@
             </div>
         </div>
 
-        <!-- Recent Generations -->
+        <!-- Recent Generations (Library Preview) -->
         <div id="historyContainer" class="history-container hidden">
-            <h3 class="history-title">📚 Recent Generations</h3>
+            <div class="history-header">
+                <h3 class="history-title">📚 Recent Videos</h3>
+                <button class="view-all-btn" onclick="showLibrary()">View All →</button>
+            </div>
             <div id="historyList" class="history-list"></div>
         </div>
 
@@ -144,9 +163,12 @@
         <!-- Footer -->
         <footer class="footer">
             <p>Made with ❤️ by NeoClip AI</p>
-            <p><a href="https://github.com/kubanmedia/neoclip302" target="_blank">GitHub</a> | v3.3.0</p>
+            <p><a href="https://github.com/kubanmedia/neoclip302" target="_blank">GitHub</a> | v3.4.0</p>
         </footer>
     </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
 
 </body>
 </html>
