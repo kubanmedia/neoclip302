@@ -1,361 +1,324 @@
 -- ============================================
--- NeoClip 302 - Complete Supabase Database Schema
--- Version: 3.3.0 - Optimized for Async Video Generation
+-- NeoClip 302 - Supabase Database Schema v3.4.0
+-- Matches production database structure
 -- ============================================
 -- 
--- Run this SQL in your Supabase SQL Editor to set up the database
--- This schema supports:
--- - User management with anonymous and OAuth authentication
--- - Video generation tracking with async task management
--- - Usage quotas and billing
--- - Analytics and session tracking
--- - API key rotation for multi-provider support
+-- Run this SQL in your Supabase SQL Editor
+-- This schema is designed to match the actual production database
 --
 -- ============================================
 
--- Enable required extensions
+-- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- ============================================
--- CLEAN UP (Optional - Remove existing tables)
--- ============================================
--- Uncomment these lines if you want to drop existing tables
--- DROP TABLE IF EXISTS app_events CASCADE;
--- DROP TABLE IF EXISTS user_sessions CASCADE;
--- DROP TABLE IF EXISTS webhook_logs CASCADE;
--- DROP TABLE IF EXISTS api_keys CASCADE;
--- DROP TABLE IF EXISTS generations CASCADE;
--- DROP TABLE IF EXISTS users CASCADE;
 
 -- ============================================
 -- USERS TABLE
--- Core user data with subscription and usage tracking
 -- ============================================
-CREATE TABLE IF NOT EXISTS users (
-    -- Primary identifiers
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    device_id TEXT UNIQUE,
-    email TEXT UNIQUE,
+CREATE TABLE IF NOT EXISTS public.users (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    
+    -- Device identification
+    device_id text UNIQUE,
     
     -- Authentication
-    auth_provider TEXT DEFAULT 'anonymous' CHECK (auth_provider IN ('anonymous', 'google', 'apple', 'email', 'github')),
-    auth_provider_id TEXT,
+    auth_provider_id text,
+    auth_provider text DEFAULT 'anonymous',
+    email text UNIQUE,
+    email_verified boolean DEFAULT false,
     
-    -- Profile data (from OAuth)
-    full_name TEXT,
-    display_name TEXT,
-    avatar_url TEXT,
-    locale TEXT DEFAULT 'en',
-    timezone TEXT,
-    
-    -- Account verification
-    email_verified BOOLEAN DEFAULT false,
-    phone TEXT,
-    phone_verified BOOLEAN DEFAULT false,
-    
-    -- Subscription & Billing
-    tier TEXT DEFAULT 'free' CHECK (tier IN ('free', 'basic', 'pro', 'enterprise')),
-    stripe_customer_id TEXT,
-    stripe_subscription_id TEXT,
-    subscription_status TEXT DEFAULT 'active' CHECK (subscription_status IN ('active', 'cancelled', 'past_due', 'trialing', 'paused')),
-    subscription_ends_at TIMESTAMPTZ,
-    
-    -- Usage tracking (monthly)
-    free_used INTEGER DEFAULT 0 CHECK (free_used >= 0),
-    paid_used INTEGER DEFAULT 0 CHECK (paid_used >= 0),
-    total_videos_generated INTEGER DEFAULT 0,
-    total_videos_downloaded INTEGER DEFAULT 0,
-    resets_at DATE DEFAULT (date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month')::DATE,
-    
-    -- Referral system
-    referral_code TEXT UNIQUE,
-    referred_by TEXT,
-    referral_count INTEGER DEFAULT 0,
-    referral_rewards_claimed INTEGER DEFAULT 0,
-    
-    -- API key rotation index
-    rotation_index INTEGER DEFAULT 0,
-    
-    -- Marketing attribution
-    utm_source TEXT,
-    utm_medium TEXT,
-    utm_campaign TEXT,
-    acquisition_channel TEXT,
-    
-    -- User preferences
-    notifications_enabled BOOLEAN DEFAULT true,
-    marketing_emails_enabled BOOLEAN DEFAULT true,
-    dark_mode BOOLEAN DEFAULT true,
-    preferred_quality TEXT DEFAULT '1080p',
-    preferred_aspect_ratio TEXT DEFAULT '9:16',
-    
-    -- Onboarding
-    has_seen_onboarding BOOLEAN DEFAULT false,
-    onboarding_completed_at TIMESTAMPTZ,
-    
-    -- Session tracking
-    last_login_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    last_active_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    login_count INTEGER DEFAULT 1,
+    -- Profile
+    full_name text,
+    display_name text,
+    avatar_url text,
     
     -- Device info
-    device_platform TEXT CHECK (device_platform IN ('ios', 'android', 'web', NULL)),
-    device_model TEXT,
-    app_version TEXT,
-    os_version TEXT,
+    device_platform text,
+    device_model text,
+    os_version text,
+    app_version text,
+    locale text DEFAULT 'en',
+    timezone text,
+    
+    -- Marketing attribution
+    utm_campaign text,
+    utm_source text,
+    utm_medium text,
+    utm_term text,
+    utm_content text,
+    utm_params jsonb DEFAULT '{}'::jsonb,
+    acquisition_channel text,
+    
+    -- Referral system
+    referral_code text UNIQUE,
+    referred_by uuid REFERENCES public.users(id),
+    referral_count integer DEFAULT 0,
+    
+    -- Preferences
+    dark_mode boolean DEFAULT false,
+    language text DEFAULT 'en',
+    notification_settings jsonb DEFAULT '{}'::jsonb,
+    notifications_enabled boolean DEFAULT true,
+    marketing_emails_enabled boolean DEFAULT true,
+    preferred_theme text DEFAULT 'system',
+    video_autoplay boolean DEFAULT true,
+    preferred_aspect_ratio text DEFAULT '16:9',
+    preferred_quality text DEFAULT '720p',
+    
+    -- Usage tracking
+    total_videos_generated integer DEFAULT 0,
+    tier text DEFAULT 'free' CHECK (tier IN ('free', 'basic', 'pro')),
+    current_tier text DEFAULT 'free',
+    free_used integer DEFAULT 0 CHECK (free_used >= 0),
+    paid_used integer DEFAULT 0,
+    pro_used integer DEFAULT 0,
+    monthly_usage_count integer DEFAULT 0,
+    last_monthly_reset timestamp with time zone,
+    resets_at date DEFAULT ((date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month'))::date,
+    
+    -- Session tracking
+    last_active_at timestamp with time zone,
+    last_login_at timestamp with time zone,
+    login_count integer DEFAULT 0,
+    
+    -- Subscription
+    is_pro_user boolean DEFAULT false,
+    trial_ends_at timestamp with time zone,
+    subscription_status text DEFAULT 'inactive',
+    subscription_ends_at timestamp with time zone,
+    stripe_customer_id text,
+    stripe_subscription_id text,
+    
+    -- Onboarding
+    has_seen_onboarding boolean DEFAULT false,
+    
+    -- Security
+    is_active boolean DEFAULT true,
+    failed_login_attempts integer DEFAULT 0,
+    lockout_until timestamp with time zone,
+    two_factor_enabled boolean DEFAULT false,
     
     -- Timestamps
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for users table
-CREATE INDEX IF NOT EXISTS idx_users_device_id ON users(device_id);
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_tier ON users(tier);
-CREATE INDEX IF NOT EXISTS idx_users_auth_provider ON users(auth_provider);
-CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
-CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
-CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_users_resets_at ON users(resets_at);
+-- Indexes for users
+CREATE INDEX IF NOT EXISTS idx_users_device_id ON public.users(device_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_tier ON public.users(tier);
+CREATE INDEX IF NOT EXISTS idx_users_referral_code ON public.users(referral_code);
+CREATE INDEX IF NOT EXISTS idx_users_created_at ON public.users(created_at DESC);
 
 -- ============================================
 -- GENERATIONS TABLE
--- Video generation tasks and results (async pattern)
 -- ============================================
-CREATE TABLE IF NOT EXISTS generations (
-    -- Primary identifiers
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    task_id TEXT,  -- Provider's task/request ID
+CREATE TABLE IF NOT EXISTS public.generations (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid REFERENCES public.users(id) ON DELETE CASCADE,
+    
+    -- Provider task tracking
+    task_id text,
     
     -- Generation input
-    prompt TEXT NOT NULL,
-    negative_prompt TEXT,
+    prompt text NOT NULL,
     
     -- Configuration
-    tier TEXT DEFAULT 'free' CHECK (tier IN ('free', 'basic', 'pro', 'enterprise')),
-    model TEXT,  -- Provider model name
-    provider TEXT CHECK (provider IN ('fal', 'wan', 'luma', 'minimax', 'replicate', 'piapi', NULL)),
-    aspect_ratio TEXT DEFAULT '9:16',
-    duration INTEGER DEFAULT 10,
-    resolution TEXT DEFAULT '768p',
+    tier text DEFAULT 'free',
+    length integer DEFAULT 10,
+    duration integer DEFAULT 10,
+    resolution text DEFAULT '768p',
+    model text,
+    provider text,
     
     -- Results
-    video_url TEXT,
-    thumbnail_url TEXT,
-    preview_url TEXT,
-    file_size INTEGER,
-    actual_duration DECIMAL(10, 2),
-    
-    -- Status tracking (for async polling)
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'queued', 'processing', 'completed', 'failed', 'cancelled')),
-    error TEXT,
-    error_code TEXT,
-    retry_count INTEGER DEFAULT 0,
-    
-    -- Cost tracking
-    cost DECIMAL(10, 6) DEFAULT 0,
-    credits_used INTEGER DEFAULT 1,
-    
-    -- Performance metrics
-    queue_time_ms INTEGER,
-    generation_time_ms INTEGER,
-    total_time_ms INTEGER,
-    poll_count INTEGER DEFAULT 0,
-    
-    -- User engagement
-    shared_count INTEGER DEFAULT 0,
-    download_count INTEGER DEFAULT 0,
-    view_count INTEGER DEFAULT 0,
-    
-    -- Timestamps
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ
-);
-
--- Indexes for generations table
-CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
-CREATE INDEX IF NOT EXISTS idx_generations_task_id ON generations(task_id);
-CREATE INDEX IF NOT EXISTS idx_generations_status ON generations(status);
-CREATE INDEX IF NOT EXISTS idx_generations_created_at ON generations(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_generations_model ON generations(model);
-CREATE INDEX IF NOT EXISTS idx_generations_provider ON generations(provider);
-CREATE INDEX IF NOT EXISTS idx_generations_user_status ON generations(user_id, status);
-
--- ============================================
--- API KEYS TABLE
--- Provider API keys with rotation and rate limiting
--- ============================================
-CREATE TABLE IF NOT EXISTS api_keys (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    provider TEXT NOT NULL CHECK (provider IN ('fal', 'replicate', 'piapi', 'minimax', 'luma')),
-    key_value TEXT NOT NULL,
-    key_name TEXT,
+    video_url text,
+    thumbnail_url text,
     
     -- Status
-    is_active BOOLEAN DEFAULT true,
-    is_primary BOOLEAN DEFAULT false,
+    status text DEFAULT 'pending' CHECK (status IN ('pending', 'queued', 'processing', 'completed', 'failed', 'cancelled')),
+    error text,
     
-    -- Usage tracking
-    free_credits_remaining INTEGER DEFAULT 0,
-    total_requests INTEGER DEFAULT 0,
-    successful_requests INTEGER DEFAULT 0,
-    failed_requests INTEGER DEFAULT 0,
-    
-    -- Rate limiting
-    requests_per_minute INTEGER DEFAULT 60,
-    requests_per_day INTEGER DEFAULT 1000,
-    current_minute_requests INTEGER DEFAULT 0,
-    current_day_requests INTEGER DEFAULT 0,
-    rate_limit_reset_at TIMESTAMPTZ,
-    
-    -- Error tracking
-    last_error TEXT,
-    last_error_at TIMESTAMPTZ,
-    consecutive_errors INTEGER DEFAULT 0,
-    disabled_reason TEXT,
+    -- Cost tracking
+    cost numeric DEFAULT 0,
+    cost_usd numeric DEFAULT 0,
     
     -- Timestamps
-    last_used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider);
-CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_active);
-CREATE INDEX IF NOT EXISTS idx_api_keys_provider_active ON api_keys(provider, is_active);
+-- Indexes for generations
+CREATE INDEX IF NOT EXISTS idx_generations_user_id ON public.generations(user_id);
+CREATE INDEX IF NOT EXISTS idx_generations_task_id ON public.generations(task_id);
+CREATE INDEX IF NOT EXISTS idx_generations_status ON public.generations(status);
+CREATE INDEX IF NOT EXISTS idx_generations_created_at ON public.generations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generations_user_status ON public.generations(user_id, status);
 
 -- ============================================
--- WEBHOOK LOGS TABLE
--- Track incoming webhooks from providers
+-- PROVIDER KEYS TABLE
 -- ============================================
-CREATE TABLE IF NOT EXISTS webhook_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    task_id TEXT,
-    generation_id UUID REFERENCES generations(id) ON DELETE SET NULL,
-    source TEXT CHECK (source IN ('fal', 'replicate', 'piapi', 'minimax', 'stripe', 'other')),
-    event_type TEXT,
-    status TEXT,
-    payload JSONB,
-    response_code INTEGER,
-    processing_time_ms INTEGER,
-    error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.provider_keys (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid REFERENCES public.users(id),
+    provider_type text,
+    api_key text,
+    usage_count integer DEFAULT 0,
+    last_used_at timestamp with time zone,
+    is_active boolean DEFAULT true,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_webhook_logs_task_id ON webhook_logs(task_id);
-CREATE INDEX IF NOT EXISTS idx_webhook_logs_generation_id ON webhook_logs(generation_id);
-CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_webhook_logs_source ON webhook_logs(source);
+CREATE INDEX IF NOT EXISTS idx_provider_keys_provider ON public.provider_keys(provider_type);
+
+-- ============================================
+-- REFERRAL CODES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.referral_codes (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid REFERENCES public.users(id),
+    code text UNIQUE,
+    used_by_user_id uuid REFERENCES public.users(id),
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    expires_at timestamp with time zone
+);
+
+-- ============================================
+-- REFERRALS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.referrals (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    referrer_id uuid REFERENCES public.users(id),
+    referred_id uuid REFERENCES public.users(id),
+    referral_code text NOT NULL,
+    status text DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'rewarded')),
+    reward_type text DEFAULT 'free_month',
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    completed_at timestamp with time zone
+);
+
+-- ============================================
+-- SUBSCRIPTIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.subscriptions (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid REFERENCES public.users(id),
+    stripe_subscription_id text UNIQUE,
+    stripe_price_id text,
+    status text DEFAULT 'active' CHECK (status IN ('active', 'canceled', 'past_due', 'unpaid')),
+    tier text NOT NULL,
+    current_period_start timestamp with time zone,
+    current_period_end timestamp with time zone,
+    cancel_at_period_end boolean DEFAULT false,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON public.subscriptions(user_id);
 
 -- ============================================
 -- USER SESSIONS TABLE
--- Track user sessions for analytics
 -- ============================================
-CREATE TABLE IF NOT EXISTS user_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    
-    session_token TEXT UNIQUE,
-    device_fingerprint TEXT,
-    
-    -- Session info
-    ip_address INET,
-    user_agent TEXT,
-    platform TEXT,
-    browser TEXT,
-    country_code TEXT,
-    city TEXT,
-    
-    -- Duration
-    started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    ended_at TIMESTAMPTZ,
-    last_active_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Activity
-    pages_viewed INTEGER DEFAULT 0,
-    videos_generated INTEGER DEFAULT 0,
-    videos_downloaded INTEGER DEFAULT 0,
-    
-    -- Referrer
-    referrer_url TEXT,
-    landing_page TEXT
+CREATE TABLE IF NOT EXISTS public.user_sessions (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid REFERENCES public.users(id),
+    session_token text UNIQUE,
+    device_info jsonb,
+    ip_address inet,
+    user_agent text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    expires_at timestamp with time zone,
+    last_activity_at timestamp with time zone,
+    is_active boolean DEFAULT true
 );
 
-CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_sessions_started_at ON user_sessions(started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_sessions_session_token ON user_sessions(session_token);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON public.user_sessions(user_id);
 
 -- ============================================
 -- APP EVENTS TABLE
--- Track user interactions for analytics
 -- ============================================
-CREATE TABLE IF NOT EXISTS app_events (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    session_id UUID REFERENCES user_sessions(id) ON DELETE SET NULL,
-    
-    event_name TEXT NOT NULL,
-    event_category TEXT CHECK (event_category IN ('engagement', 'conversion', 'error', 'navigation', 'system')),
-    event_data JSONB,
-    
-    -- Context
-    screen_name TEXT,
-    referrer TEXT,
-    
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.app_events (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid REFERENCES public.users(id),
+    event_type text,
+    event_data jsonb,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    ip_address inet,
+    user_agent text
 );
 
-CREATE INDEX IF NOT EXISTS idx_app_events_user_id ON app_events(user_id);
-CREATE INDEX IF NOT EXISTS idx_app_events_event_name ON app_events(event_name);
-CREATE INDEX IF NOT EXISTS idx_app_events_created_at ON app_events(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_app_events_category ON app_events(event_category);
+CREATE INDEX IF NOT EXISTS idx_app_events_user_id ON public.app_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_app_events_event_type ON public.app_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_app_events_created_at ON public.app_events(created_at DESC);
 
 -- ============================================
--- ROW LEVEL SECURITY (RLS)
+-- WEBHOOK LOGS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.webhook_logs (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_id text,
+    source text,
+    status text,
+    payload jsonb,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_logs_task_id ON public.webhook_logs(task_id);
+
+-- ============================================
+-- ROW LEVEL SECURITY
 -- ============================================
 
--- Enable RLS on all tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE generations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE webhook_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE app_events ENABLE ROW LEVEL SECURITY;
+-- Enable RLS
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.generations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.provider_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referral_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referrals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
 
--- Allow service role full access (for Vercel serverless functions)
--- These policies allow the Supabase service key to access all data
-DROP POLICY IF EXISTS "Service role has full access to users" ON users;
-CREATE POLICY "Service role has full access to users"
-    ON users FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Service role has full access to generations" ON generations;
-CREATE POLICY "Service role has full access to generations"
-    ON generations FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Service role has full access to api_keys" ON api_keys;
-CREATE POLICY "Service role has full access to api_keys"
-    ON api_keys FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Service role has full access to webhook_logs" ON webhook_logs;
-CREATE POLICY "Service role has full access to webhook_logs"
-    ON webhook_logs FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Service role has full access to user_sessions" ON user_sessions;
-CREATE POLICY "Service role has full access to user_sessions"
-    ON user_sessions FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Service role has full access to app_events" ON app_events;
-CREATE POLICY "Service role has full access to app_events"
-    ON app_events FOR ALL USING (true) WITH CHECK (true);
+-- Service role policies (for Vercel serverless)
+CREATE POLICY "Service role full access - users" ON public.users FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - generations" ON public.generations FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - provider_keys" ON public.provider_keys FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - referral_codes" ON public.referral_codes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - referrals" ON public.referrals FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - subscriptions" ON public.subscriptions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - user_sessions" ON public.user_sessions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - app_events" ON public.app_events FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access - webhook_logs" ON public.webhook_logs FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
 -- HELPER FUNCTIONS
 -- ============================================
 
--- Generate unique referral code
+-- Auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Triggers for updated_at
+DROP TRIGGER IF EXISTS update_users_updated_at ON public.users;
+CREATE TRIGGER update_users_updated_at
+    BEFORE UPDATE ON public.users
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_generations_updated_at ON public.generations;
+CREATE TRIGGER update_generations_updated_at
+    BEFORE UPDATE ON public.generations
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Generate referral code
 CREATE OR REPLACE FUNCTION generate_referral_code()
 RETURNS TEXT AS $$
 DECLARE
@@ -364,14 +327,14 @@ DECLARE
 BEGIN
     LOOP
         code := 'NC' || upper(substring(md5(random()::text || clock_timestamp()::text) from 1 for 6));
-        SELECT EXISTS(SELECT 1 FROM users WHERE referral_code = code) INTO exists_flag;
+        SELECT EXISTS(SELECT 1 FROM public.users WHERE referral_code = code) INTO exists_flag;
         EXIT WHEN NOT exists_flag;
     END LOOP;
     RETURN code;
 END;
 $$ LANGUAGE plpgsql;
 
--- Auto-generate referral code on user creation
+-- Auto-generate referral code on user insert
 CREATE OR REPLACE FUNCTION set_referral_code()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -382,23 +345,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trigger_set_referral_code ON users;
+DROP TRIGGER IF EXISTS trigger_set_referral_code ON public.users;
 CREATE TRIGGER trigger_set_referral_code
-    BEFORE INSERT ON users
+    BEFORE INSERT ON public.users
     FOR EACH ROW
     EXECUTE FUNCTION set_referral_code();
 
--- Reset monthly free usage (call this with a cron job)
+-- Reset monthly usage
 CREATE OR REPLACE FUNCTION reset_monthly_free_usage()
 RETURNS INTEGER AS $$
 DECLARE
     updated_count INTEGER;
 BEGIN
-    UPDATE users
+    UPDATE public.users
     SET 
         free_used = 0,
         paid_used = 0,
-        resets_at = (date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month')::DATE,
+        resets_at = ((date_trunc('month', CURRENT_TIMESTAMP) + INTERVAL '1 month'))::date,
         updated_at = CURRENT_TIMESTAMP
     WHERE resets_at <= CURRENT_DATE;
     
@@ -407,86 +370,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Get next active API key for a provider (with rotation)
-CREATE OR REPLACE FUNCTION get_active_key(provider_name TEXT)
-RETURNS TEXT AS $$
-DECLARE
-    key_val TEXT;
-BEGIN
-    SELECT key_value INTO key_val
-    FROM api_keys
-    WHERE provider = provider_name
-      AND is_active = true
-      AND consecutive_errors < 3
-    ORDER BY last_used_at NULLS FIRST, total_requests ASC
-    LIMIT 1;
-    
-    IF key_val IS NOT NULL THEN
-        UPDATE api_keys
-        SET 
-            last_used_at = CURRENT_TIMESTAMP,
-            total_requests = total_requests + 1,
-            current_minute_requests = current_minute_requests + 1
-        WHERE provider = provider_name AND key_value = key_val;
-    END IF;
-    
-    RETURN key_val;
-END;
-$$ LANGUAGE plpgsql;
-
--- Mark API key error
-CREATE OR REPLACE FUNCTION mark_api_key_error(provider_name TEXT, key_val TEXT, error_msg TEXT)
-RETURNS void AS $$
-BEGIN
-    UPDATE api_keys
-    SET 
-        failed_requests = failed_requests + 1,
-        consecutive_errors = consecutive_errors + 1,
-        last_error = error_msg,
-        last_error_at = CURRENT_TIMESTAMP,
-        is_active = CASE WHEN consecutive_errors >= 5 THEN false ELSE is_active END,
-        disabled_reason = CASE WHEN consecutive_errors >= 5 THEN 'Too many consecutive errors' ELSE disabled_reason END
-    WHERE provider = provider_name AND key_value = key_val;
-END;
-$$ LANGUAGE plpgsql;
-
--- Reset API key error count on success
-CREATE OR REPLACE FUNCTION mark_api_key_success(provider_name TEXT, key_val TEXT)
-RETURNS void AS $$
-BEGIN
-    UPDATE api_keys
-    SET 
-        successful_requests = successful_requests + 1,
-        consecutive_errors = 0
-    WHERE provider = provider_name AND key_value = key_val;
-END;
-$$ LANGUAGE plpgsql;
-
--- ============================================
--- AUTO-UPDATE TRIGGERS
--- ============================================
-
--- Update updated_at timestamp on any update
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
 -- Update user stats on generation completion
 CREATE OR REPLACE FUNCTION update_user_stats_on_generation()
 RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.status = 'completed' AND (OLD.status IS NULL OR OLD.status != 'completed') THEN
-        UPDATE users
+        UPDATE public.users
         SET 
             total_videos_generated = total_videos_generated + 1,
             last_active_at = CURRENT_TIMESTAMP
@@ -496,18 +385,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trigger_update_user_stats ON generations;
+DROP TRIGGER IF EXISTS trigger_update_user_stats ON public.generations;
 CREATE TRIGGER trigger_update_user_stats
-    AFTER INSERT OR UPDATE ON generations
+    AFTER INSERT OR UPDATE ON public.generations
     FOR EACH ROW
     EXECUTE FUNCTION update_user_stats_on_generation();
 
 -- ============================================
--- VIEWS FOR ANALYTICS
+-- VIEWS
 -- ============================================
 
--- Daily generation stats
-CREATE OR REPLACE VIEW daily_generation_stats AS
+-- User video library view
+CREATE OR REPLACE VIEW public.user_video_library AS
+SELECT 
+    g.id,
+    g.user_id,
+    g.prompt,
+    g.video_url,
+    g.thumbnail_url,
+    g.tier,
+    g.model,
+    g.duration,
+    g.status,
+    g.created_at,
+    g.completed_at
+FROM public.generations g
+WHERE g.status = 'completed' AND g.video_url IS NOT NULL
+ORDER BY g.created_at DESC;
+
+-- Daily stats view
+CREATE OR REPLACE VIEW public.daily_generation_stats AS
 SELECT 
     DATE(created_at) as date,
     COUNT(*) as total_generations,
@@ -515,73 +422,19 @@ SELECT
     COUNT(*) FILTER (WHERE status = 'failed') as failed,
     COUNT(*) FILTER (WHERE tier = 'free') as free_tier,
     COUNT(*) FILTER (WHERE tier != 'free') as paid_tier,
-    AVG(total_time_ms) FILTER (WHERE status = 'completed') as avg_generation_time_ms,
-    SUM(cost) as total_cost
-FROM generations
+    SUM(cost_usd) as total_cost
+FROM public.generations
 GROUP BY DATE(created_at)
 ORDER BY date DESC;
-
--- Provider performance stats
-CREATE OR REPLACE VIEW provider_performance AS
-SELECT 
-    provider,
-    model,
-    COUNT(*) as total_tasks,
-    COUNT(*) FILTER (WHERE status = 'completed') as completed,
-    COUNT(*) FILTER (WHERE status = 'failed') as failed,
-    ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'completed') / NULLIF(COUNT(*), 0), 2) as success_rate,
-    AVG(total_time_ms) FILTER (WHERE status = 'completed') as avg_time_ms,
-    SUM(cost) as total_cost
-FROM generations
-WHERE provider IS NOT NULL
-GROUP BY provider, model
-ORDER BY total_tasks DESC;
-
--- User engagement summary
-CREATE OR REPLACE VIEW user_engagement_summary AS
-SELECT 
-    u.id,
-    u.email,
-    u.tier,
-    u.free_used,
-    u.total_videos_generated,
-    u.created_at,
-    u.last_active_at,
-    COUNT(g.id) as generations_count,
-    COUNT(g.id) FILTER (WHERE g.status = 'completed') as successful_generations
-FROM users u
-LEFT JOIN generations g ON u.id = g.user_id
-GROUP BY u.id
-ORDER BY u.total_videos_generated DESC;
-
--- ============================================
--- SAMPLE DATA (Optional - for testing)
--- ============================================
-
--- Insert a test user (uncomment to use)
--- INSERT INTO users (device_id, email, tier, free_used)
--- VALUES ('test-device-001', 'test@example.com', 'free', 0)
--- ON CONFLICT (device_id) DO NOTHING;
-
--- ============================================
--- GRANTS
--- ============================================
-
--- Grant usage to authenticated users (if using Supabase Auth)
--- GRANT USAGE ON SCHEMA public TO authenticated;
--- GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
--- GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
 
 -- ============================================
 -- NOTES
 -- ============================================
-
 -- 1. Run this schema in Supabase SQL Editor
--- 2. Set up environment variables in Vercel:
---    - SUPABASE_URL: Your Supabase project URL
---    - SUPABASE_KEY: Your Supabase service role key (not anon key!)
--- 3. For monthly usage reset, set up a cron job to call:
---    SELECT reset_monthly_free_usage();
--- 4. Monitor the provider_performance view to track API success rates
-
--- End of schema
+-- 2. Set environment variables in Vercel:
+--    - SUPABASE_URL
+--    - SUPABASE_KEY (service role key)
+--    - FAL_KEY
+--    - REPLICATE_KEY
+--    - PIAPI_KEY
+-- 3. For monthly reset, call: SELECT reset_monthly_free_usage();
